@@ -6,6 +6,13 @@
 
 """
 collectd python plugin to report to rcp controller 
+
+ write callbacks come many within 1s, store in to_write
+ xx                                                xx
+0----1----2----3----4----5----6----7----8----9---10---> time (s)
+    |         |         |         |         |
+    dwrite timer every 2 seconds will send and invalidate to_write
+    if it is more than a second old
 """
 
 import collectd
