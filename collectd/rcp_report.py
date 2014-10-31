@@ -41,6 +41,7 @@ class RcpReporter (object):
     self.port = None
     self.to_write = {}
     self.channel_name = None
+    self.should_quit = False
     self.relevant_intf = ['eth0', 'wlan0']
     self.connect_timer = threading.Timer(30, self.try_connect)
     self.write_timer = threading.Timer(2, self.dwrite)
@@ -69,6 +70,9 @@ class RcpReporter (object):
   @return boolean success
   """
   def dwrite(self):
+    if self.should_quit: 
+      # don't restart the timer, we are about to quit
+      return False
     result = False
     if self.sock and self.connected and self.to_write and time.time() > self.to_write['time'] + 1:
       try:
@@ -85,8 +89,6 @@ class RcpReporter (object):
     self.write_timer = threading.Timer(2, self.dwrite)
     self.write_timer.start()
     return result
-  
-      
   
   """
   config: collectd config callback
@@ -139,6 +141,7 @@ class RcpReporter (object):
   """    
   def shutdown(self):
     # gracefully clean up and close the socket
+    self.should_quit = True
     if self.sock and self.connected:
       collectd.info("Caught shutdown callback; shutting down")
       self.sock.shutdown(socket.SHUT_RDWR)
