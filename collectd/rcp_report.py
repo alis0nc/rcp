@@ -42,7 +42,7 @@ class RcpReporter (object):
     self.to_write = {}
     self.channel_name = None
     self.should_quit = False
-    self.relevant_intf = ['eth0', 'wlan0']
+    self.relevant_intf = []
     self.connect_timer = threading.Timer(30, self.try_connect)
     self.write_timer = threading.Timer(2, self.dwrite)
     
@@ -111,6 +111,18 @@ class RcpReporter (object):
   """  
   def init(self):
     self.try_connect()
+    # send hello message
+    if self.sock and self.connected:
+      hellomsg = {}
+      hellomsg['channel'] = self.channel_name
+      hellomsg['cmd'] = 'join_channel'
+      self.sock.send(json.dumps(hellomsg))
+      hellomsg = {}
+      hellomsg['CHANNEL'] = self.channel_name
+      hellomsg['cmd'] = 'hello'
+      hellomsg['hostname'] = socket.gethostname()
+      hellomsg['interfaces'] = self.relevant_intf
+      self.sock.send(json.dumps(hellomsg))
     self.write_timer = threading.Timer(2, self.dwrite)
     self.write_timer.start()
     
@@ -124,6 +136,7 @@ class RcpReporter (object):
     self.to_write['time'] = vl.time
     self.to_write['CHANNEL'] = self.channel_name
     self.to_write['host'] = vl.host
+    self.to_write['cmd'] = 'stats'
     if vl.plugin == 'interface' or vl.plugin == 'wireless':
       if vl.plugin_instance in self.relevant_intf:
         self.to_write[vl.plugin_instance + '_' + vl.type] = vl.values

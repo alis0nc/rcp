@@ -1,5 +1,6 @@
 # coding=utf8
 # Copyright 2014 Alison Chan
+# Kettering University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,20 +40,12 @@ import subprocess
 # Create a logger for this component
 log = core.getLogger()
 
-# http://stackoverflow.com/a/136280/1760157
-# except this answer actually works
-def tail(f, n, offset=0):
-  stdout = subprocess.check_output(['tail', '-n', str(n+offset), f])
-  lines = stdout.splitlines()
-  return lines[:-offset if offset else None]
-
 class RCP (object):
 
-  def __init__(self, source=None, dest=None, csvpath=None, sourcename=None, destname=None):
+  def __init__(self, source=None, dest=None, sourcename=None, destname=None):
     self.graph = nx.DiGraph()
     self.source = source
     self.dest = dest
-    self.csvpath = csvpath
     self.paths = []
     self.active_path = 0
     self.chan = None
@@ -64,43 +57,27 @@ class RCP (object):
   def timer_elapsed(self):
     self.get_stats()
   
-  def get_averages(self, csvfile, s, d, q):
-    # assume 0.1 Hz reporting rate (every 10s)
-    # also we want 15 minutes worth of data
-    nlines = 15*60 / 10
-    with tail('/'.join((csvfile, s, 'ping', '-'.join((q, d, str(dt.date.today()))))), nlines) as a:
-      vals = []
-      for line in a:
-        vals.append(line.split(',')[1])
-      # calculate the averages
-      onemin = sum(vals[-6:]) / 6
-      fivemin = sum(vals[-30:]) / 30
-      fifteenmin = sum(vals[-90:]) / 90
-      return onemin, fivemin, fifteenmin
-  
   def get_stats(self):
     """
     Sends flow and port stats requests to source and dest switches
-    Also parses csv data collected from collectd
     """
     # TODO Should we do this for all switches?
     core.openflow.connections[self.source].send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))
     core.openflow.connections[self.source].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
     core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))
-    core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
-    if self.csvpath:
-      src_ping_avgs = get_averages(self.csvpath, self.sourcename, self.destname, 'ping')
-      src_drop_avgs = get_averages(self.csvpath, self.sourcename, self.destname, 'ping_droprate')
-      dest_ping_avgs = get_averages(self.csvpath, self.destname, self.sourcename, 'ping')
-      dest_drop_avgs = get_averages(self.csvpath, self.destname, self.sourcename, 'ping_droprate')        
+    core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))     
       
   def _all_dependencies_met (self):
     # Set up the RCP channel
     self.chan = core.MessengerNexus.get_channel("RCP")
     def handle_rcp_msg (event, msg):
-      m = str(msg.get("msg"))
+      m = str(event.msg.get("msg"))
       cmd = event.msg.get("cmd")
       log.debug("Received message: " + str(event.msg))
+      if cmd == 'hello':
+        log.debug('Received hello message')
+      elif cmd == 'stats':
+        log.debug('Received stats message')
     def handle_join(event):
       log.debug(str(event.msg))
     self.chan.addListener(MessageReceived, handle_rcp_msg)
@@ -108,9 +85,11 @@ class RCP (object):
 
   def _handle_openflow_FlowStatsReceived (self, event):
     log.debug("Flow stats received")
+    log.debug(str(event.stats))
 
   def _handle_openflow_PortStatsReceived (self, event):
     log.debug("Port stats received")
+    log.debug(str(event.stats))
 
   def _handle_openflow_ConnectionUp (self, event):
     #sw = poxutil.dpid_to_str(event.dpid)
@@ -201,6 +180,9 @@ class RCP (object):
           exit_host_port)
     # now we get to set up the timer and periodically grab stats
     self.timer.start()
+    # notify messaging subscribers that connection is established
+    self.path_established()
+    
 
   def change_connection(self):
     curr_path = self.paths[self.active_path]
@@ -238,17 +220,19 @@ class RCP (object):
           self.graph[new_path[-1]][new_path[-2]][new_path[-1]],
           exit_host_port)
 
-  def path_established(self, path):
+  def path_established(self):
     """
     Notify subscribers that a path between the source and destination
     host has been established.
     """
+    self.chan.send({'msg': 'path established yay'})
     pass
 
-  def path_degradation_detected(self, path):
+  def path_degradation_detected(self):
     """
     Notify subscribers that degradation along a path has been detected.
     """
+    self.chan.send({'msg': 'path degradation detected OH NOES'})
     pass
 
   def longest_shortest_path(self):
@@ -281,11 +265,11 @@ def install_flows(sw, port1, port2, remove=False):
 def _go_up (event): pass
 
 @poxutil.eval_args
-def launch (source=None, dest=None, csvpath=None, sourcename=None, destname=None):
+def launch (source=None, dest=None, sourcename=None, destname=None):
   """
   Launch function
   """
 
   if not core.hasComponent("RCP"):
-    core.registerNew(RCP, source, dest, csvpath, sourcename, destname)
+    core.registerNew(RCP, source, dest, sourcename, destname)
   core.addListenerByName("UpEvent", _go_up)
