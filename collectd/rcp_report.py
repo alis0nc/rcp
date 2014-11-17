@@ -7,6 +7,7 @@
 """
 collectd python plugin to report to rcp controller 
 
+This plugin aggregates all of a cycle's write data as follows:
  write callbacks come many within 1s, store in to_write
  xx                                                xx
 0----1----2----3----4----5----6----7----8----9---10---> time (s)
@@ -21,18 +22,19 @@ import json
 import threading
 import time
 
-"""
-dictify: Translates object to dictionary
 
-@param vl object
-@return dictionary
-"""
 def dictify(vl):
+  """
+  Translates object to dictionary
+
+  @param vl object
+  @return dictionary
+  """
   return dict((n, getattr(vl, n)) for n in dir(vl) if not callable(getattr(vl, n)) and not n.startswith('__'))
 
 class RcpReporter (object):
   """
-  __init__
+  The class that implements aggregating messages and sending to rcp controller.
   """
   def __init__(self):
     self.connected = False
@@ -46,10 +48,11 @@ class RcpReporter (object):
     self.connect_timer = threading.Timer(30, self.try_connect)
     self.write_timer = threading.Timer(2, self.dwrite)
     
-  """
-  try_connect: tries to connect to the server, sets up a retry timer if unsuccessful
-  """
+
   def try_connect(self):
+    """
+    Tries to connect to the server, and sets up a retry timer if unsuccessful
+    """
     if not self.connected:
       try:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -64,12 +67,12 @@ class RcpReporter (object):
           self.connect_timer = threading.Timer(30, self.try_connect)
           self.connect_timer.start()
 
-  """
-  dwrite: writes data
-  
-  @return boolean success
-  """
   def dwrite(self):
+    """
+    Writes data after a delay
+    
+    @return boolean success
+    """
     if self.should_quit: 
       # don't restart the timer, we are about to quit
       return False
@@ -90,12 +93,13 @@ class RcpReporter (object):
     self.write_timer.start()
     return result
   
-  """
-  config: collectd config callback
 
-  @param conf collectd.Config object
-  """
   def config(self, conf):
+    """
+    collectd config callback
+
+    @param conf collectd.Config object
+    """
     for c in conf.children:
       if c.key == 'Host':
         self.host = c.values[0]
@@ -106,10 +110,11 @@ class RcpReporter (object):
       elif c.key == 'Interfaces':
         self.relevant_intf = list(c.values)
 
-  """
-  init: collectd init callback
-  """  
+
   def init(self):
+    """
+    collectd init callback
+    """  
     self.try_connect()
     # send hello message
     if self.sock and self.connected:
@@ -126,13 +131,14 @@ class RcpReporter (object):
     self.write_timer = threading.Timer(2, self.dwrite)
     self.write_timer.start()
     
-  """
-  write: collectd write callback
 
-  @param vl collectd.Values to write
-  
-  """
   def write(self, vl, data=None):
+    """
+    collectd write callback
+
+    @param vl collectd.Values to write
+    
+    """
     self.to_write['time'] = vl.time
     self.to_write['CHANNEL'] = self.channel_name
     self.to_write['host'] = vl.host
@@ -149,10 +155,11 @@ class RcpReporter (object):
       # it's not a plugin we are interested in
       pass
       
-  """
-  shutdown: collectd shutdown callback
-  """    
+  
   def shutdown(self):
+    """
+    collectd shutdown callback
+    """  
     # gracefully clean up and close the socket
     self.should_quit = True
     if self.sock and self.connected:

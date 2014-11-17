@@ -13,18 +13,19 @@ import socket
 import json
 import threading
 
-"""
-dictify: Translates object to dictionary
 
-@param vl object
-@return dictionary
-"""
 def dictify(vl):
+  """
+  Translates object to dictionary
+  
+  @param vl object
+  @return dictionary
+  """
   return dict((n, getattr(vl, n)) for n in dir(vl) if not callable(getattr(vl, n)) and not n.startswith('__'))
 
 class JsonStreamer (object):
   """
-  __init__
+  The class that implements JSON streaming.
   """
   def __init__(self):
     self.connected = False
@@ -33,10 +34,11 @@ class JsonStreamer (object):
     self.port = None
     self.connect_timer = threading.Timer(30, self.try_connect)
     
-  """
-  try_connect: tries to connect to the server, sets up a retry timer if unsuccessful
-  """
-  def try_connect(self):
+
+  def try_connect(self):  
+    """
+    Tries to connect to the server, and sets up a retry timer if unsuccessful
+    """
     if not self.connected:
       try:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -52,29 +54,33 @@ class JsonStreamer (object):
           self.connect_timer.start()
 
 
-  """
-  config: collectd config callback
 
-  @param conf collectd.Config object
-  """
   def config(self, conf):
+    """
+    collectd config callback
+
+    @param conf collectd.Config object
+    """
     for c in conf.children:
       if c.key == 'Host':
         self.host = c.values[0]
       elif c.key == 'Port':
         self.port = c.values[0]
 
-  """
-  init: collectd init callback
-  """  
+ 
   def init(self):
+    """
+    collectd init callback
+    """ 
     self.try_connect()
-  """
-  write: collectd write callback
+    
 
-  @param vl collectd.Values to write
-  """
   def write(self, vl, data=None):
+    """
+    collectd write callback
+
+    @param vl collectd.Values to write
+    """
     d = dictify(vl)
     if self.sock and self.connected:
       try:
@@ -85,10 +91,11 @@ class JsonStreamer (object):
         self.connected = False
         self.try_connect()
       
-  """
-  shutdown: collectd shutdown callback
-  """    
+   
   def shutdown(self):
+    """
+    collectd shutdown callback
+    """ 
     # gracefully clean up and close the socket
     if self.sock and self.connected:
       collectd.info("Caught shutdown callback; shutting down")
