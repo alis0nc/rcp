@@ -123,7 +123,18 @@ class RCP (object):
     """
     Timer elapsed
     """
-    pass    
+    self.get_stats()
+    
+  def get_stats(self):
+    """
+    Sends flow and port stats requests to source and destination switches
+    """  
+    if self.source:
+      core.openflow.connections[self.source].send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))
+      core.openflow.connections[self.source].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))
+    if self.dest:
+      core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))
+      core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))  
       
   def _all_dependencies_met (self):
     """
@@ -144,20 +155,36 @@ class RCP (object):
     self.chan.addListener(ChannelJoin, handle_join)
 
   def _handle_openflow_FlowStatsReceived (self, event):
+    """
+    Handles a FlowStatsReceived event.
+    """
     log.debug("Flow stats received")
     log.debug(str(event.stats))
 
   def _handle_openflow_PortStatsReceived (self, event):
+    """
+    Handles a PortStatsReceived event.
+    """
     log.debug("Port stats received")
     log.debug(str(event.stats))
 
   def _handle_openflow_ConnectionUp (self, event):
+    """
+    Handles a ConnectionUp event by adding the switch to the network graph.
+    """
     self.network_graph.add_node(event.dpid)
 
   def _handle_openflow_ConnectionDown (self, event):
-    self.network_graph.remove_node(event.dpid)
+    """
+    Handles a ConnectionDown event by removing the switch from the network graph.
+    """
+    if event.dpid in self.network_graph: 
+      self.network_graph.remove_node(event.dpid)
 
   def _handle_openflow_discovery_LinkEvent (self, event):
+    """
+    Handles a LinkEvent by adding the link to the network graph.
+    """
     s1 = event.link.dpid1
     s2 = event.link.dpid2
     assert s1 in self.network_graph
@@ -173,9 +200,30 @@ class RCP (object):
       if s1 in self.network_graph[s2]: del self.network_graph[s2][s1]     
 
   def establish_connection(self, source, dest, sourcename=None, destname=None):
-    pass   
+    """
+    Establishes a connection between source and destination switches. This should 
+    get called from an event in future. (probably a command received through pox.messenger)
     
-def install_flows(sw, port1, port2, remove=False):
+    @param source The source switch's dpid
+    @param dest The destination switch's dpid
+    @param sourcename Yeah, I don't know what this is
+    @param destname I don't know what this is either
+    """
+    self.source = source
+    self.dest = dest
+    self.multipath, self.paths = edge_disjoint_paths(self.network_graph, self.source, self.dest, 
+      fully_disjoint=True, max_paths=-1, weight='w')
+    # Install the flows
+    # TODO integrate host_tracker so that we don't have to assume that hosts 
+    # are connected to port 1. (this assumption really only works in mininet anyway)
+    install_flows(self.multipath, self.paths, 1, 1)
+    # Start the send stats request timer
+    self.timer.start()
+    # Notify subscribers that a connection is establish
+    self.path_established()
+    
+    
+def install_flows(multipath, paths, source_host_port, dest_host_port, remove=False):
   pass
 
 def _go_up (event): pass
