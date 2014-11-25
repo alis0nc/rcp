@@ -40,6 +40,36 @@ import subprocess
 # Create a logger for this component
 log = core.getLogger()
 
+def path_to_edgelist(path):
+  edgelist = []
+  i = 1
+  while i < len(path):
+    a, b = path[i-1], path[i]
+    edgelist.append((a, b))
+    i += 1
+  return edgelist
+
+def partition (multipath, src, dst):
+  """
+  Partition a directed multipath graph into several distinct path graphs
+  
+  @param multipath The multipath graph
+  @param src The source node
+  @param dst The destination node
+  
+  @return list of path graphs
+  """
+  paths = []
+  tempmultipath = multipath.copy()
+  while tempmultipath.number_of_edges():
+    p = nx.shortest_path(tempmultipath, src, dst)
+    for s, t in path_to_edgelist(p): 
+      tempmultipath.remove_edge(s, t)
+    G = nx.DiGraph()
+    G.add_path(p)
+    paths.append(G)
+  return paths
+
 def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, weight='w'):
   """
   finds edge disjoint paths
@@ -51,21 +81,14 @@ def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, wei
   @param max_paths maximum number of paths to return (default=-1 (unlimited))
   @param weight edge attribute to use for weight (default='w')
   
-  @return (multipath graph of all paths, list of path graphs)
+  @return (multipath digraph of all paths, list of path graphs)
   
   It is an error not to specify a maximum number of paths while not enforcing 
   full disjointness. (If you say fully_disjoint=False, then you must specify a 
   maximum number of paths.)
   """
   ### TODO: Recheck this with Bhandari's book
-  def path_to_edgelist(path):
-    edgelist = []
-    i = 1
-    while i < len[path]:
-      a, b = path[i-1], path[i]
-      edgelist.append((a, b))
-      i += 1
-    return edgelist
+
   if not fully_disjoint and max_paths == -1:
     # Error!
     raise ValueError('You must specify a maximum number of paths if not fully disjoint')
@@ -74,8 +97,7 @@ def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, wei
   inf2 = (max(tempgraph.edges(data=True), key=lambda e: e[2][weight]))[2][weight]*tempgraph.number_of_edges() + 1
   # Multipath graph
   multipath = nx.DiGraph() if fully_disjoint else nx.MultiDiGraph()
-  # List of individual paths
-  paths = []
+  brk = False
   while max_paths and not brk:
     brk = False
     shortest_path = path_to_edgelist(nx.shortest_path(tempgraph, src, dst, weight))
@@ -83,7 +105,7 @@ def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, wei
       if tempgraph.has_edge(s, t):
         tempgraph[s][t][weight] += inf2
       if tempgraph.has_edge(t, s):
-        tempgraph[t][s][weight] = -tempgraph[t][s][weight]
+        tempgraph[t][s][weight] = 0 # -tempgraph[t][s][weight]
     for s, t in shortest_path:
       # add the path to the multipath graph, erasing interlacing edges
       if multipath.has_edge(s, t) and fully_disjoint:
@@ -95,12 +117,7 @@ def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, wei
         multipath.add_edge(s, t)
     max_paths -= 1
   # Partition the multipath graph into distinct paths
-  tempmultipath = multipath.copy()
-  while tempmultipath.number_of_edges():
-    p = nx.shortest_path(tempmultipath, src, dst)
-    for s, t in path_to_edgelist(p): 
-      tempmultipath.remove_edge(s, t)
-    paths.append(nx.DiGraph(p))
+  paths = partition(multipath, src, dst)
   # Return what we've got
   return multipath, paths
 
@@ -151,8 +168,14 @@ class RCP (object):
         log.debug('Received stats message')
     def handle_join(event):
       log.debug(str(event.msg))
-    self.chan.addListener(MessageReceived, handle_rcp_msg)
-    self.chan.addListener(ChannelJoin, handle_join)
+    self.channel.addListener(MessageReceived, handle_rcp_msg)
+    self.channel.addListener(ChannelJoin, handle_join)
+    
+  def conn_ack(self):
+    """
+    Notifys messenger subscribers that we have established a connection.
+    """
+    self.channel.send({'cmd': 'ack', 'src': self.source, 'dst': self.dest})
 
   def _handle_openflow_FlowStatsReceived (self, event):
     """
@@ -190,15 +213,62 @@ class RCP (object):
     assert s1 in self.network_graph
     assert s2 in self.network_graph
     if event.added:
-      self.network_graph.add_edge(s1, s2, {'w':1})
-      self.network_graph[s1][s2] = event.port_for_dpid(s1)
-      self.network_graph[s2][s1] = event.port_for_dpid(s2)
+      port_dict={s1: event.port_for_dpid(s1),
+                 s2: event.port_for_dpid(s2), 
+                 'w': 1}
+      self.network_graph.add_edge(s1, s2, port_dict)
     elif event.removed:
       if (s1, s2) in self.network_graph.edges():
         self.network_graph.remove_edge(s1, s2)
-      if s2 in self.network_graph[s1]: del self.network_graph[s1][s2]
-      if s1 in self.network_graph[s2]: del self.network_graph[s2][s1]     
-
+      
+  def install_flows(self, paths, source, dest, source_host_port, dest_host_port, remove=False):
+    """
+    Installs flows in the network for each path
+    
+    @param paths a list of directed path graphs
+    @param source the source node
+    @param dest the destination node 
+    @param source_host_port the port which the source host is connected to
+    @param dest_host_port the port which the destination host is connected to
+    @param remove remove these flows? (default: False)
+    """
+    # FIXME: this should probably be mpls tag?
+    vlan = 1000
+    sourcemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
+    destbasemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
+    sourcemsg.match = of.ofp_match(in_port = source_host_port)
+    destbasemsg.actions.append(of.ofp_action_strip_vlan())
+    destbasemsg.actions.append(of.ofp_action_output(port=dest_host_port))
+    destmsgs = []
+    for path in paths:
+      vlan += 1
+      for node in path:
+        msg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
+        in_port = out_port = of.OFPP_NONE
+        if node == source: # special case: source
+          out_port = self.network_graph[node][path.neighbors(node)[0]][node]
+          sourcemsg.actions.append(of.ofp_action_vlan_vid(vlan_vid=vlan))
+          sourcemsg.actions.append(of.ofp_action_output(port=out_port))
+        elif node == dest: # special case: destination
+          destmsg = destbasemsg.clone()
+          in_port = self.network_graph[node][path.predecessors(node)[0]][node]
+          destmsg.match = of.ofp_match(in_port=in_port, dl_vlan = vlan)
+          destmsgs.append(destmsg)
+        else: # general case
+          in_port = self.network_graph[node][path.predecessors(node)[0]][node]
+          out_port = self.network_graph[node][path.neighbors(node)[0]][node]
+          msg.match = of.ofp_match(in_port=in_port, dl_vlan=vlan)
+          msg.actions.append(of.ofp_action_vlan_vid(vlan_vid=vlan))
+          msg.actions.append(of.ofp_action_output(port=out_port))
+          log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(msg)))
+          core.openflow.connections[node].send(msg)
+    # now we can actually send the flows for the source and dest switches  
+    log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(source), str(sourcemsg)))  
+    core.openflow.connections[source].send(sourcemsg)
+    for msg in destmsgs:
+      log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(dest), str(msg)))
+      core.openflow.connections[dest].send(msg)
+     
   def establish_connection(self, source, dest, sourcename=None, destname=None):
     """
     Establishes a connection between source and destination switches. This should 
@@ -216,24 +286,24 @@ class RCP (object):
     # Install the flows
     # TODO integrate host_tracker so that we don't have to assume that hosts 
     # are connected to port 1. (this assumption really only works in mininet anyway)
-    install_flows(self.multipath, self.paths, 1, 1)
+    self.install_flows(self.paths, self.source, self.dest, 1, 1)
+    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, 1, 1)
     # Start the send stats request timer
     self.timer.start()
     # Notify subscribers that a connection is establish
-    self.path_established()
+    self.conn_ack()
     
     
-def install_flows(multipath, paths, source_host_port, dest_host_port, remove=False):
-  pass
+
 
 def _go_up (event): pass
 
 @poxutil.eval_args
-def launch (source=None, dest=None, sourcename=None, destname=None):
+def launch ():
   """
   Launch function
   """
 
   if not core.hasComponent("RCP"):
-    core.registerNew(RCP, source, dest, sourcename, destname)
+    core.registerNew(RCP)
   core.addListenerByName("UpEvent", _go_up)
