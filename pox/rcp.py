@@ -176,7 +176,19 @@ class RCP (object):
     Notifys messenger subscribers that we have established a connection.
     """
     self.channel.send({'cmd': 'ack', 'src': self.source, 'dst': self.dest})
-
+    
+  def conn_nak(self, already_connected):
+    """
+    Notifys messenger subscribers that we can't establish connection.
+    """
+    self.channel.send({'cmd': 'nak', 'src'=self.source, 'dst'=self.dest, 'already_connected'=already_connected})
+    
+  def conn_fin(self):
+    """
+    Notifys messenger subscribers that we have torn down a connection.
+    """
+    self.channel.send({'cmd': 'fin', 'src'=self.source, 'dst'=self.dest})
+    
   def _handle_openflow_FlowStatsReceived (self, event):
     """
     Handles a FlowStatsReceived event.
@@ -232,7 +244,7 @@ class RCP (object):
     @param dest_host_port the port which the destination host is connected to
     @param remove remove these flows? (default: False)
     """
-    # FIXME: this should probably be mpls tag?
+    # FIXME: this should probably be mpls tag or at least configurable vlan number
     vlan = 1000
     sourcemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
     destbasemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
@@ -269,19 +281,19 @@ class RCP (object):
       log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(dest), str(msg)))
       core.openflow.connections[dest].send(msg)
      
-  def establish_connection(self, source, dest, sourcename=None, destname=None):
+  def establish_connection(self, source, dest):
     """
     Establishes a connection between source and destination switches. This should 
     get called from an event in future. (probably a command received through pox.messenger)
     
     @param source The source switch's dpid
     @param dest The destination switch's dpid
-    @param sourcename Yeah, I don't know what this is
-    @param destname I don't know what this is either
     """
     # check if we are already connected, in which case nak
     if self._connected: 
-      
+      self.conn_nak(already_connected=True)
+      return
+    
     self.source = source
     self.dest = dest
     _, self.paths = edge_disjoint_paths(self.network_graph, self.source, self.dest, 
@@ -299,13 +311,14 @@ class RCP (object):
     
   def disestablish_connection(self):
     """
-    Tears down a RCP conection
+    Tears down a RCP connection
     """
     self._connected = False
     # TODO integrate host_tracker so that we don't have to assume that hosts 
     # are connected to port 1. (this assumption really only works in mininet anyway)
     self.install_flows(self.paths, self.source, self.dest, 1, 1, remove=True)
     self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, 1, 1, remove=True)
+    self.conn_fin()
     self.source = self.dest = None
     self.paths = []
 
