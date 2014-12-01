@@ -130,9 +130,9 @@ class RCP (object):
                                     # LinkEvents and openflow.discovery
     self.source = None
     self.dest = None
-    self.multipath = None # Multipath graph
     self.paths = [] # List of distinct paths
     self.channel = None # Messenger channel
+    self._connected = False
     self.timer = recoco.Timer(30, self.timer_elapsed, recurring=True, started=False)
     core.listen_to_dependencies(self)
     
@@ -279,9 +279,12 @@ class RCP (object):
     @param sourcename Yeah, I don't know what this is
     @param destname I don't know what this is either
     """
+    # check if we are already connected, in which case nak
+    if self._connected: 
+      
     self.source = source
     self.dest = dest
-    self.multipath, self.paths = edge_disjoint_paths(self.network_graph, self.source, self.dest, 
+    _, self.paths = edge_disjoint_paths(self.network_graph, self.source, self.dest, 
       fully_disjoint=True, max_paths=-1, weight='w')
     # Install the flows
     # TODO integrate host_tracker so that we don't have to assume that hosts 
@@ -291,9 +294,20 @@ class RCP (object):
     # Start the send stats request timer
     self.timer.start()
     # Notify subscribers that a connection is establish
+    self._connected = True
     self.conn_ack()
     
-    
+  def disestablish_connection(self):
+    """
+    Tears down a RCP conection
+    """
+    self._connected = False
+    # TODO integrate host_tracker so that we don't have to assume that hosts 
+    # are connected to port 1. (this assumption really only works in mininet anyway)
+    self.install_flows(self.paths, self.source, self.dest, 1, 1, remove=True)
+    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, 1, 1, remove=True)
+    self.source = self.dest = None
+    self.paths = []
 
 
 def _go_up (event): pass
