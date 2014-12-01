@@ -153,23 +153,28 @@ class RCP (object):
       core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))
       core.openflow.connections[self.dest].send(of.ofp_stats_request(body=of.ofp_port_stats_request()))  
       
+  def handle_rcp_msg(self, event, msg):
+    m = str(event.msg.get('msg'))
+    cmd = str(event.msg.get('cmd'))
+    if cmd == 'hello':
+      log.debug('Received hello message')
+    elif cmd == 'stats':
+      log.debug('Received stats message')
+    elif cmd == 'connect':
+      log.debug('Received connect message')
+      self.establish_connection(event.msg.get('source'), event.msg.get('dest'))
+      
+  def handle_join(self, event):
+    log.debug(str(event.msg))
+      
   def _all_dependencies_met (self):
     """
     All dependencies met: then set up the Messenger channel and event handlers
     for it
     """
     self.channel = core.MessengerNexus.get_channel('RCP')
-    def handle_rcp_msg (event, msg):
-      m = str(event.msg.get('msg'))
-      cmd = str(event.msg.get('cmd'))
-      if cmd == 'hello':
-        log.debug('Received hello message')
-      elif cmd == 'stats':
-        log.debug('Received stats message')
-    def handle_join(event):
-      log.debug(str(event.msg))
-    self.channel.addListener(MessageReceived, handle_rcp_msg)
-    self.channel.addListener(ChannelJoin, handle_join)
+    self.channel.addListener(MessageReceived, self.handle_rcp_msg)
+    self.channel.addListener(ChannelJoin, self.handle_join)
     
   def conn_ack(self):
     """
@@ -181,13 +186,13 @@ class RCP (object):
     """
     Notifys messenger subscribers that we can't establish connection.
     """
-    self.channel.send({'cmd': 'nak', 'src'=self.source, 'dst'=self.dest, 'already_connected'=already_connected})
+    self.channel.send({'cmd': 'nak', 'src': self.source, 'dst': self.dest, 'already_connected': already_connected})
     
   def conn_fin(self):
     """
     Notifys messenger subscribers that we have torn down a connection.
     """
-    self.channel.send({'cmd': 'fin', 'src'=self.source, 'dst'=self.dest})
+    self.channel.send({'cmd': 'fin', 'src': self.source, 'dst': self.dest})
     
   def _handle_openflow_FlowStatsReceived (self, event):
     """
