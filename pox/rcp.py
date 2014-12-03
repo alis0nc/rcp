@@ -119,6 +119,7 @@ def edge_disjoint_paths (graph, src, dst, fully_disjoint=True, max_paths=-1, wei
   # Partition the multipath graph into distinct paths
   paths = partition(multipath, src, dst)
   # Return what we've got
+  log.debug([p.edges() for p in paths])
   return multipath, paths
 
 class RCP (object):
@@ -130,9 +131,14 @@ class RCP (object):
                                     # LinkEvents and openflow.discovery
     self.source = None
     self.dest = None
+    self.source_host_port = self.dest_host_port = of.OFPP_NONE
     self.paths = [] # List of distinct paths
+    self.vlan_for_path = {} # key: path; value: vlan used by path
     self.channel = None # Messenger channel
     self._connected = False
+    # FIXME this might need to be a MPLS tag or some other way of telling paths apart
+    self.basevlan = 1000
+    self.vlans_in_use = []
     self.timer = recoco.Timer(30, self.timer_elapsed, recurring=True, started=False)
     core.listen_to_dependencies(self)
     
@@ -182,7 +188,7 @@ class RCP (object):
     """
     self.channel.send({'cmd': 'ack', 'src': self.source, 'dst': self.dest})
     
-  def conn_nak(self, already_connected):
+  def conn_nak(self, already_connected=False):
     """
     Notifys messenger subscribers that we can't establish connection.
     """
@@ -216,14 +222,16 @@ class RCP (object):
 
   def _handle_openflow_ConnectionDown (self, event):
     """
-    Handles a ConnectionDown event by removing the switch from the network graph.
+    Handles a ConnectionDown event by removing the switch from the network graph. 
     """
     if event.dpid in self.network_graph: 
       self.network_graph.remove_node(event.dpid)
 
   def _handle_openflow_discovery_LinkEvent (self, event):
     """
-    Handles a LinkEvent by adding the link to the network graph.
+    Handles a LinkEvent by adding or removing the link to the network graph.
+    If a connection is in progress when this happens, it recalculates potential 
+    paths and maybe changes the installed flows.
     """
     s1 = event.link.dpid1
     s2 = event.link.dpid2
@@ -237,28 +245,43 @@ class RCP (object):
     elif event.removed:
       if (s1, s2) in self.network_graph.edges():
         self.network_graph.remove_edge(s1, s2)
-      
-  def install_flows(self, paths, source, dest, source_host_port, dest_host_port, remove=False):
+    if self._connected:
+      # We're connected, and we have to deal with a connectivity change, so let's recalculate paths
+      _, newpaths = edge_disjoint_paths(self.network_graph, self.source, self.dest)
+      for p in newpaths:
+        if p.edges() not in [P.edges() for P in self.paths]: # if we've gained a path
+          self.install_flows([p], self.source, self.dest)
+          self.install_flows([p.reverse()], self.dest, self.source)
+          self.paths.append(p)
+      for p in self.paths:
+        if p.edges() not in [P.edges() for P in newpaths]: # if we've lost a path
+          self.install_flows([p], self.source, self.dest, remove=True)
+          self.install_flows([p.reverse()], self.dest, self.source, remove=True)
+          self.paths.remove(p)
+                  
+  def install_flows(self, paths, source, dest, remove=False):
     """
     Installs flows in the network for each path
     
     @param paths a list of directed path graphs
     @param source the source node
     @param dest the destination node 
-    @param source_host_port the port which the source host is connected to
-    @param dest_host_port the port which the destination host is connected to
     @param remove remove these flows? (default: False)
     """
-    # FIXME: this should probably be mpls tag or at least configurable vlan number
-    vlan = 1000
+    vlan = 0 if remove else self.basevlan
     sourcemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
     destbasemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
-    sourcemsg.match = of.ofp_match(in_port = source_host_port)
+    sourcemsg.match = of.ofp_match(in_port = self.source_host_port)
     destbasemsg.actions.append(of.ofp_action_strip_vlan())
-    destbasemsg.actions.append(of.ofp_action_output(port=dest_host_port))
+    destbasemsg.actions.append(of.ofp_action_output(port=self.dest_host_port))
     destmsgs = []
     for path in paths:
-      vlan += 1
+      if remove: # look up what vlan we need to remove
+        vlan = self.vlan_for_path[path]
+        del self.vlan_for_path[path]
+      else: # take the lowest unused vlan
+        while vlan in self.vlan_for_path.values(): vlan += 1
+        self.vlan_for_path[path] = vlan
       for node in path:
         msg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
         in_port = out_port = of.OFPP_NONE
@@ -306,8 +329,9 @@ class RCP (object):
     # Install the flows
     # TODO integrate host_tracker so that we don't have to assume that hosts 
     # are connected to port 1. (this assumption really only works in mininet anyway)
-    self.install_flows(self.paths, self.source, self.dest, 1, 1)
-    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, 1, 1)
+    self.source_host_port = self.dest_host_port = 1
+    self.install_flows(self.paths, self.source, self.dest)
+    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source)
     # Start the send stats request timer
     self.timer.start()
     # Notify subscribers that a connection is establish
@@ -319,10 +343,8 @@ class RCP (object):
     Tears down a RCP connection
     """
     self._connected = False
-    # TODO integrate host_tracker so that we don't have to assume that hosts 
-    # are connected to port 1. (this assumption really only works in mininet anyway)
-    self.install_flows(self.paths, self.source, self.dest, 1, 1, remove=True)
-    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, 1, 1, remove=True)
+    self.install_flows(self.paths, self.source, self.dest, remove=True)
+    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, remove=True)
     self.conn_fin()
     self.source = self.dest = None
     self.paths = []
