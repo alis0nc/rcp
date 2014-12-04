@@ -205,14 +205,12 @@ class RCP (object):
     Handles a FlowStatsReceived event.
     """
     log.debug("Flow stats received")
-    log.debug([str(stat) for stat in event.stats])
 
   def _handle_openflow_PortStatsReceived (self, event):
     """
     Handles a PortStatsReceived event.
     """
     log.debug("Port stats received")
-    log.debug([str(stat) for stat in event.stats])
 
   def _handle_openflow_ConnectionUp (self, event):
     """
