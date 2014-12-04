@@ -325,7 +325,7 @@ class RCP (object):
     self.source = source
     self.dest = dest
     _, self.paths = edge_disjoint_paths(self.network_graph, self.source, self.dest, 
-      fully_disjoint=True, max_paths=-1, weight='w')
+      fully_disjoint=True, max_paths=2, weight='w')
     # Install the flows
     # TODO integrate host_tracker so that we don't have to assume that hosts 
     # are connected to port 1. (this assumption really only works in mininet anyway)
