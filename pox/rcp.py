@@ -133,7 +133,8 @@ class RCP (object):
     self.dest = None
     self.source_host_port = self.dest_host_port = of.OFPP_NONE
     self.paths = [] # List of distinct paths
-    self.vlan_for_path = {} # key: path; value: vlan used by path
+    self.vlan_for_path = {} # key: path.edges(); value: vlan used by path
+    self.flowspace = {} # key: switch dpid; value: list of flow_mods
     self.channel = None # Messenger channel
     self._connected = False
     # FIXME this might need to be a MPLS tag or some other way of telling paths apart
@@ -216,6 +217,7 @@ class RCP (object):
     """
     Handles a ConnectionUp event by adding the switch to the network graph.
     """
+    self.flowspace[event.dpid] = []
     self.network_graph.add_node(event.dpid)
 
   def _handle_openflow_ConnectionDown (self, event):
@@ -224,6 +226,7 @@ class RCP (object):
     """
     if event.dpid in self.network_graph: 
       self.network_graph.remove_node(event.dpid)
+      del self.flowspace[event.dpid]
 
   def _handle_openflow_discovery_LinkEvent (self, event):
     """
@@ -248,65 +251,101 @@ class RCP (object):
       _, newpaths = edge_disjoint_paths(self.network_graph, self.source, self.dest)
       for p in newpaths:
         if p.edges() not in [P.edges() for P in self.paths]: # if we've gained a path
-          self.install_flows([p], self.source, self.dest)
-          self.install_flows([p.reverse()], self.dest, self.source)
+          core.callLater(self.install_flows, [p], self.source, self.dest)
+          core.callLater(self.install_flows,[p.reverse()], self.dest, self.source)
           self.paths.append(p)
       for p in self.paths:
         if p.edges() not in [P.edges() for P in newpaths]: # if we've lost a path
-          self.install_flows([p], self.source, self.dest, remove=True)
-          self.install_flows([p.reverse()], self.dest, self.source, remove=True)
+          core.callLater(self.remove_flows, [p], self.source, self.dest)
+          core.callLater(self.remove_flows, [p.reverse()], self.dest, self.source)
           self.paths.remove(p)
                   
-  def install_flows(self, paths, source, dest, remove=False):
+  def install_flows(self, paths, source, dest):
     """
     Installs flows in the network for each path
     
     @param paths a list of directed path graphs
     @param source the source node
     @param dest the destination node 
-    @param remove remove these flows? (default: False)
     """
-    vlan = 0 if remove else self.basevlan
-    sourcemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
-    destbasemsg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
-    sourcemsg.match = of.ofp_match(in_port = self.source_host_port)
-    destbasemsg.actions.append(of.ofp_action_strip_vlan())
-    destbasemsg.actions.append(of.ofp_action_output(port=self.dest_host_port))
-    destmsgs = []
+    if source in self.flowspace and any([x.match.in_port == self.source_host_port for x in self.flowspace[source]]):
+      source_f = [x for x in self.flowspace[source] if x.match.in_port == self.source_host_port][0]
+      source_f.command = of.OFPFC_MODIFY
+      del self.flowspace[source][self.flowspace[source].index(source_f)]
+    else: 
+      source_f = of.ofp_flow_mod(command=of.OFPFC_ADD)
+      source_f.match = of.ofp_match(in_port=self.source_host_port)
     for path in paths:
-      if remove: # look up what vlan we need to remove
-        vlan = self.vlan_for_path[path]
-        del self.vlan_for_path[path]
-      else: # take the lowest unused vlan
-        while vlan in self.vlan_for_path.values(): vlan += 1
-        self.vlan_for_path[path] = vlan
+      vlan = self.basevlan
+      # take the lowest unused vlan
+      while vlan in self.vlan_for_path.values(): vlan += 1
+      self.vlan_for_path[tuple(path.edges())] = vlan
       for node in path:
-        msg = of.ofp_flow_mod(command = of.OFPFC_DELETE if remove else of.OFPFC_ADD)
-        in_port = out_port = of.OFPP_NONE
-        if node == source: # special case: source
+        if node == source:
+          # special case for source
           out_port = self.network_graph[node][path.neighbors(node)[0]][node]
-          sourcemsg.actions.append(of.ofp_action_vlan_vid(vlan_vid=vlan))
-          sourcemsg.actions.append(of.ofp_action_output(port=out_port))
-        elif node == dest: # special case: destination
-          destmsg = destbasemsg.clone()
+          source_f.actions.append(of.ofp_action_vlan_vid(vlan_vid=vlan))
+          source_f.actions.append(of.ofp_action_output(port=out_port))
+        elif node == dest:
+          # special case for dest
+          f = of.ofp_flow_mod()
+          f.command = of.OFPFC_ADD
           in_port = self.network_graph[node][path.predecessors(node)[0]][node]
-          destmsg.match = of.ofp_match(in_port=in_port, dl_vlan = vlan)
-          destmsgs.append(destmsg)
-        else: # general case
+          out_port = self.dest_host_port
+          f.match = of.ofp_match(in_port=in_port, dl_vlan=vlan)
+          f.actions.append(of.ofp_action_strip_vlan())
+          f.actions.append(of.ofp_action_output(port=out_port))
+          self.flowspace[node].append(f)
+          log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(f)))
+          core.openflow.connections[node].send(f)
+        else: 
+          # general case
+          f = of.ofp_flow_mod()
+          f.command = of.OFPFC_ADD
           in_port = self.network_graph[node][path.predecessors(node)[0]][node]
           out_port = self.network_graph[node][path.neighbors(node)[0]][node]
-          msg.match = of.ofp_match(in_port=in_port, dl_vlan=vlan)
-          msg.actions.append(of.ofp_action_vlan_vid(vlan_vid=vlan))
-          msg.actions.append(of.ofp_action_output(port=out_port))
-          log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(msg)))
-          core.openflow.connections[node].send(msg)
-    # now we can actually send the flows for the source and dest switches  
-    log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(source), str(sourcemsg)))  
-    core.openflow.connections[source].send(sourcemsg)
-    for msg in destmsgs:
-      log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(dest), str(msg)))
-      core.openflow.connections[dest].send(msg)
-     
+          f.match = of.ofp_match(in_port=in_port, dl_vlan=vlan)
+          f.actions.append(of.ofp_action_vlan_vid(vlan_vid = vlan))
+          f.actions.append(of.ofp_action_output(port=out_port))
+          self.flowspace[node].append(f)
+          log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(f)))
+          core.openflow.connections[node].send(f)
+    # finally we can install the flow on source
+    self.flowspace[source].append(source_f)
+    log.debug("Installing flow on %s: \n%s" % (poxutil.dpid_to_str(source), str(source_f)))
+    core.openflow.connections[source].send(source_f)
+      
+  def remove_flows(self, paths, source, dest):
+    """
+    Removes flows from the network for each path
+    
+    @param paths a list of directed path graphs
+    @param source the source node
+    @param dest the destination node 
+    """
+    for path in paths:
+      vlan = self.vlan_for_path[tuple(path.edges())]
+      for node in path:
+        if node == source:
+          # special case for source
+          # find the replicatory flow, and if vlan is in our actions, remove it
+          f = [x for x in self.flowspace[node] if len(x.actions) > 2][0]
+          idx = f.actions.index([a for a in f.actions if isinstance(a, of.ofp_action_vlan_vid) and a.vlan_vid == vlan][0])
+          del f.actions[idx]
+          del f.actions[idx]
+          f.command = of.OFPFC_MODIFY
+          log.debug("Modifying flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(f)))
+          core.openflow.connections[node].send(f)
+          # We don't need to update flowspace, since we modified that flow in place
+        else:
+          ftr = [f for f in self.flowspace[node] if f.match.dl_vlan == vlan]
+          for f in ftr: 
+            f.command = of.OFPFC_DELETE 
+            log.debug("Removing flow on %s: \n%s" % (poxutil.dpid_to_str(node), str(f)))
+            core.openflow.connections[node].send(f)
+            self.flowspace[node] = [f for f in self.flowspace[node] if f.match.dl_vlan != vlan]
+      del self.vlan_for_path[tuple(path.edges())]
+
   def establish_connection(self, source, dest):
     """
     Establishes a connection between source and destination switches. This should 
@@ -328,8 +367,8 @@ class RCP (object):
     # TODO integrate host_tracker so that we don't have to assume that hosts 
     # are connected to port 1. (this assumption really only works in mininet anyway)
     self.source_host_port = self.dest_host_port = 1
-    self.install_flows(self.paths, self.source, self.dest)
-    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source)
+    core.callLater(self.install_flows, self.paths, self.source, self.dest)
+    core.callLater(self.install_flows, [p.reverse() for p in self.paths], self.dest, self.source)
     # Start the send stats request timer
     self.timer.start()
     # Notify subscribers that a connection is establish
@@ -341,8 +380,8 @@ class RCP (object):
     Tears down a RCP connection
     """
     self._connected = False
-    self.install_flows(self.paths, self.source, self.dest, remove=True)
-    self.install_flows([p.reverse() for p in self.paths], self.dest, self.source, remove=True)
+    core.callLater(self.remove_flows, self.paths, self.source, self.dest)
+    core.callLater(self.remove_flows, [p.reverse() for p in self.paths], self.dest, self.source)
     self.conn_fin()
     self.source = self.dest = None
     self.paths = []
