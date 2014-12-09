@@ -377,11 +377,14 @@ class RCP (object):
     
   def disestablish_connection(self):
     """
-    Tears down a RCP connection
+    Tears down a RCP connection by clearing the entire relevant flowspace.
     """
     self._connected = False
-    core.callLater(self.remove_flows, self.paths, self.source, self.dest)
-    core.callLater(self.remove_flows, [p.reverse() for p in self.paths], self.dest, self.source)
+    for sw in self.flowspace: 
+      for flow in self.flowspace[sw]:
+        flow.command = of.OFPFC_DELETE
+        core.openflow.connections[sw].send(flow)
+      self.flowspace[sw] = []
     self.conn_fin()
     self.source = self.dest = None
     self.paths = []
