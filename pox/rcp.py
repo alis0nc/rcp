@@ -170,6 +170,9 @@ class RCP (object):
     elif cmd == 'connect':
       log.debug('Received connect message')
       self.establish_connection(event.msg.get('source'), event.msg.get('dest'))
+    elif cmd == 'disconnect':
+      log.debug('Received disconnect message')
+      self.disestablish_connection()
       
   def handle_join(self, event):
     log.debug(str(event.msg))
@@ -200,6 +203,12 @@ class RCP (object):
     Notifys messenger subscribers that we have torn down a connection.
     """
     self.channel.send({'cmd': 'fin', 'src': self.source, 'dst': self.dest})
+    
+  def _handle_core_GoingDownEvent(self, event):
+    """
+    Handles a GoingDown event.
+    """
+    self.disestablish_connection()
     
   def _handle_openflow_FlowStatsReceived (self, event):
     """
@@ -248,17 +257,7 @@ class RCP (object):
         self.network_graph.remove_edge(s1, s2)
     if self._connected:
       # We're connected, and we have to deal with a connectivity change, so let's recalculate paths
-      _, newpaths = edge_disjoint_paths(self.network_graph, self.source, self.dest)
-      for p in newpaths:
-        if p.edges() not in [P.edges() for P in self.paths]: # if we've gained a path
-          core.callLater(self.install_flows, [p], self.source, self.dest)
-          core.callLater(self.install_flows,[p.reverse()], self.dest, self.source)
-          self.paths.append(p)
-      for p in self.paths:
-        if p.edges() not in [P.edges() for P in newpaths]: # if we've lost a path
-          core.callLater(self.remove_flows, [p], self.source, self.dest)
-          core.callLater(self.remove_flows, [p.reverse()], self.dest, self.source)
-          self.paths.remove(p)
+      self.change_paths()
                   
   def install_flows(self, paths, source, dest):
     """
@@ -375,6 +374,37 @@ class RCP (object):
     self._connected = True
     self.conn_ack()
     
+  def change_paths(self, avoid=None):
+    """
+    Recalculates paths.
+    
+    @param avoid path to avoid (could be due to deterioration) (default: None)
+    """
+    # Empirical timing analysis
+    import time
+    t_ = time.clock()
+    if not self._connected: # nothing doing
+      return
+    newpaths = []
+    if avoid:
+      newgraph = self.network_graph.copy()
+      newgraph.remove_edges_from(avoid.edges())
+      _, newpaths = edge_disjoint_paths(newgraph, self.source, self.dest, max_paths=2)
+    else:
+      _, newpaths = edge_disjoint_paths(self.network_graph, self.source, self.dest, max_paths=2)
+    for p in newpaths:
+      if p.edges() not in [P.edges() for P in self.paths]: # if we've gained a path
+        core.callLater(self.install_flows, [p], self.source, self.dest)
+        core.callLater(self.install_flows,[p.reverse()], self.dest, self.source)
+        self.paths.append(p)
+    for p in self.paths:
+      if p.edges() not in [P.edges() for P in newpaths]: # if we've lost a path
+        core.callLater(self.remove_flows, [p], self.source, self.dest)
+        core.callLater(self.remove_flows, [p.reverse()], self.dest, self.source)
+        self.paths.remove(p)
+    # Empirical timing analysis    
+    print("Changing paths took %f seconds" % (time.clock() - t_))
+    
   def disestablish_connection(self):
     """
     Tears down a RCP connection by clearing the entire relevant flowspace.
@@ -388,6 +418,7 @@ class RCP (object):
     self.conn_fin()
     self.source = self.dest = None
     self.paths = []
+    self.timer.cancel()
 
 
 def _go_up (event): pass
