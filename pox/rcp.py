@@ -140,7 +140,6 @@ class RCP (object):
     # FIXME this might need to be a MPLS tag or some other way of telling paths apart
     self.basevlan = 1000
     self.vlans_in_use = []
-    self.timer = recoco.Timer(30, self.timer_elapsed, recurring=True, started=False)
     core.listen_to_dependencies(self)
     
   def timer_elapsed (self):
@@ -369,6 +368,7 @@ class RCP (object):
     core.callLater(self.install_flows, self.paths, self.source, self.dest)
     core.callLater(self.install_flows, [p.reverse() for p in self.paths], self.dest, self.source)
     # Start the send stats request timer
+    self.timer = recoco.Timer(30, self.timer_elapsed, recurring=True, started=False)
     self.timer.start()
     # Notify subscribers that a connection is establish
     self._connected = True
@@ -383,6 +383,8 @@ class RCP (object):
     # Empirical timing analysis
     import time
     t_ = time.clock()
+    msg = of.ofp_echo_request(body="Path recalculation started")
+    core.openflow.connections[self.source].send(msg)
     if not self._connected: # nothing doing
       return
     newpaths = []
@@ -403,6 +405,8 @@ class RCP (object):
         core.callLater(self.remove_flows, [p.reverse()], self.dest, self.source)
         self.paths.remove(p)
     # Empirical timing analysis    
+    msg = of.ofp_echo_request(body="Path recalculation finished")
+    core.openflow.connections[self.source].send(msg)
     print("Changing paths took %f seconds" % (time.clock() - t_))
     
   def disestablish_connection(self):
