@@ -1,0 +1,54 @@
+\documentclass{article}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{
+    colorlinks,
+    linkcolor={red!50!black},
+    citecolor={blue!50!black},
+    urlcolor={blue!80!black}
+}
+\author{alisonc}
+\title{Notes for literature review}
+\date{2015-04-23}
+
+\begin{document}
+\maketitle
+
+Lots of design decisions for MPTCP were made with the goal of making it 
+compatible with Plain Old TCP and the myriad of middleboxes in the today's 
+internet. This is not something we need to be concerned about. \cite{rfc6824}
+
+MPTCP: the same data can be sent on multiple subflows for resilience. The first 
+copy that arrives should be taken as authoritative and delivered to the application;
+further are ignored. \cite[p.~25]{rfc6824}
+
+Retransmissions are ``clearly suboptimal''. All retransmissions on a different subflow 
+first require retransmission on the original subflow. Why? Because compatibility with
+legacy middleboxes. \cite[\S~3.3.6]{rfc6824} Also, much about subflows depends on local policy. 
+\cite[\S~3.3.8]{rfc6824}
+
+``Multiple retransmissions are triggers that will indicate that a
+subflow performs badly and could lead to a host resetting the subflow
+with a RST.  However, additional research is required to understand
+the heuristics of how and when to reset underperforming subflows.
+For example, a highly asymmetric path may be misdiagnosed as
+underperforming.'' \cite[p.~33]{rfc6824}
+
+Subflow priority is binary -- either main or backup. This is just a suggestion and
+not binding though.
+
+Address adding and removing via \texttt{ADD\_ADDR} and \texttt{REMOVE\_ADDR} depends 
+on the hosts view of its network connections, not the topology. \cite[\S~3.4]{rfc6824}.
+
+MPTCP has some shortcomings:
+\begin{itemize}
+  \item No network level view of topology. can't pick the $k$ shortest paths
+  \item Most applicable to multihomed systems
+  \item data redundancy is implement badly
+  \item All the design compromises to be compatible with legacy middleboxen
+\end{itemize}
+
+\bibliographystyle{plain}
+\bibliography{sources.bib}
+\end{document}
