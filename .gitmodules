@@ -1,0 +1,3 @@
+[submodule "kuthesis"]
+	path = kuthesis
+	url = ../kuthesis.git
