@@ -1,0 +1,275 @@
+\documentclass[letterpaper]{../kuthesis/kuthesis}
+\usepackage{graphicx} %for images in figures
+\graphicspath{ {images/} } % setting the graphics path
+\usepackage{caption}
+\usepackage{mathtools}
+\usepackage{apacite}
+\usepackage{url}
+\usepackage{filecontents}
+\usepackage{listings}
+\usepackage[strict]{changepage}
+\usepackage{setspace}
+
+% Table caption and label setup, since tables and figures are different in the KU template
+\captionsetup{labelsep=none} % get rid of the normal separator
+\DeclareCaptionFormat{underlcap}{\\[4ex] #1 #2 \\[2ex] #3 } % tables require 2x doublespace before the Table #., then 1 more between there and the caption.
+\DeclareCaptionLabelFormat{underlcap}{#1 #2}
+\DeclareCaptionLabelSeparator{underlcap}{}
+\DeclareCaptionTextFormat{underlcap}{\expandafter\underline\expandafter{\expandafter#1}\\[2ex]} % underlines the table caption
+\captionsetup[table]{format=underlcap,labelformat=underlcap,labelseparator=underlcap,textformat=underlcap,justification=raggedright,singlelinecheck=false}
+
+% Title Page
+\title{Developing a Reliable Communications Protocol for Advanced Manufacturing}
+\author{Alison Chan}
+\department{Computer Science}
+\departmentdual{Computer Engineering}
+\employer{Kettering University}
+\gdate{2015} % Year only
+
+\begin{document}
+\maketitle[research]
+
+\begin{preface}
+This thesis represents the capstone of my five years combined academic work 
+at Kettering University and past work experiences.  My Culminating 
+Undergraduate Experience provided the opportunity for me to use the 
+knowledge and skillset learned while at Kettering to manage a project 
+of this magnitude.
+
+Although this thesis represents the compilation of my own efforts, I would 
+like to acknowledge and extend my sincere gratitude to the following persons 
+for their valuable time and assistance, for without whom the completion of 
+this thesis would not have been possible:
+
+\begin{enumerate}
+  \item The \texttt{geni-users}, \texttt{pox-dev}, and \texttt{mininet-discuss} mailing list
+        contributors, for assisting me with issues and (stupid) questions I had.
+\end{enumerate}
+\end{preface}
+
+\singlespacing
+\tableofcontents\
+\listofillustrations
+
+% % % % % % % % % % % % % % % % % % % % % % % % 
+% End of prefatory material
+\begincontent
+
+% ___       _                 _            _   _             
+%|_ _|_ __ | |_ _ __ ___   __| |_   _  ___| |_(_) ___  _ __  
+% | || '_ \| __| '__/ _ \ / _` | | | |/ __| __| |/ _ \| '_ \ 
+% | || | | | |_| | | (_) | (_| | |_| | (__| |_| | (_) | | | |
+%|___|_| |_|\__|_|  \___/ \__,_|\__,_|\___|\__|_|\___/|_| |_| 
+
+\chapter{Introduction}
+
+\section{Background}
+There are various problems in today's internet that preclude its use for 
+reliable remote process control. For instance, it does not guarantee a 
+fixed latency. Heavy traffic in a network segment could cause latency spikes
+or packets to be dropped outright. If a manufacturing process is being 
+controlled remotely, an interruption in communication could result in an 
+unrecoverable manufacturing error and therefore wasted material.
+
+\section{Problem}
+\emph{(Should I just give an overview of the current internet in the background
+section, then go into the problems with it in this section?)}
+
+\section{Motivation}
+The Reliable Communications Protocol (RCP) aims to use software defined 
+networking (SDN) to enable the reliable remote control of manufacturing 
+processes. This will make it possible for a user to take advantage of, 
+for example, remote 3D printer hardware while controlling the slicing, 
+tool paths, and extruder temperature locally. It will also make it practical 
+for labs to share their equipment over the internet.
+
+\section{Previous Work}
+There has been a wealth of previous work on reliable communications with
+independent paths. For instance, MPTCP (Multipath TCP), defined
+by \citeauthor{rfc6824} in RFC 6824, 
+adds multipath 
+capabilities to the legacy TCP standard. However, it makes significant 
+compromises to remain compatible with middleboxes in the legacy internet. 
+For instance, retransmissions of packets on a different path must happen 
+after retransmitting on the original path \cite{rfc6824}. This is done 
+for legacy compatibility reasons -- a middlebox 
+could block the retransmitted packet on the different path because of, e.g.\ 
+a sequence number mismatch.
+Also, MPTCP endpoints have no knowledge of the routes or traffic levels in 
+the network, so they can't optimise their paths to avoid congestion or ensure 
+full independence or shortness of paths. 
+
+According to \citeauthor{oh09}, ``a popular approach [for reliable 
+communication] is to use  multiple paths and transmit identical copies 
+of the packet on each path'' \citeyear{oh09}. Indeed, US Patent 7373543
+describes this being used as a way to recover quickly from a disrupted 
+connection along one path \cite{us7373543}. However, it does not describe anything 
+about monitoring latency along both paths and establishing a new path when 
+congestion is detected.
+
+
+
+\section{Roadmap}
+The remainder of this thesis proceeds as follows. 
+Chapter~\ref{c:overview} gives an overview of software-defined networking 
+and the GENI infrastructure.
+Chapter~\ref{c:architecture} describes the architecture of RCP. 
+Chapter~\ref{c:development} describes the development of RCP.
+Chapter~\ref{c:results} gives the results of testing RCP.
+Finally, Chapter~\ref{c:cnr} presents conclusions and suggestions for future work.
+
+%  ___                       _               
+% / _ \__   _____ _ ____   _(_) _____      __
+%| | | \ \ / / _ \ '__\ \ / / |/ _ \ \ /\ / /
+%| |_| |\ V /  __/ |   \ V /| |  __/\ V  V / 
+% \___/  \_/ \___|_|    \_/ |_|\___| \_/\_/  
+\chapter{Overview of SDN/GENI} \label{c:overview}
+
+%    _             _     _ _            _                  
+%   / \   _ __ ___| |__ (_) |_ ___  ___| |_ _   _ _ __ ___ 
+%  / _ \ | '__/ __| '_ \| | __/ _ \/ __| __| | | | '__/ _ \
+% / ___ \| | | (__| | | | | ||  __/ (__| |_| |_| | | |  __/
+%/_/   \_\_|  \___|_| |_|_|\__\___|\___|\__|\__,_|_|  \___|
+\chapter{Architecture of RCP} \label{c:architecture}
+
+% ____                 _                                  _   
+%|  _ \  _____   _____| | ___  _ __  _ __ ___   ___ _ __ | |_ 
+%| | | |/ _ \ \ / / _ \ |/ _ \| '_ \| '_ ` _ \ / _ \ '_ \| __|
+%| |_| |  __/\ V /  __/ | (_) | |_) | | | | | |  __/ | | | |_ 
+%|____/ \___| \_/ \___|_|\___/| .__/|_| |_| |_|\___|_| |_|\__|
+%                             |_|                             
+\chapter{Development of RCP} \label{c:development}
+
+% ____                 _ _       
+%|  _ \ ___  ___ _   _| | |_ ___ 
+%| |_) / _ \/ __| | | | | __/ __|
+%|  _ <  __/\__ \ |_| | | |_\__ \
+%|_| \_\___||___/\__,_|_|\__|___/
+\chapter{Test Results} \label{c:results}
+
+%  ____                 _           _                 
+% / ___|___  _ __   ___| |_   _ ___(_) ___  _ __  ___ 
+%| |   / _ \| '_ \ / __| | | | / __| |/ _ \| '_ \/ __|
+%| |__| (_) | | | | (__| | |_| \__ \ | (_) | | | \__ \
+% \____\___/|_| |_|\___|_|\__,_|___/_|\___/|_| |_|___/
+
+\chapter{Conclusions and Recommendations} \label{c:cnr}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Morbi viverra orci non placerat iaculis. Suspendisse mattis lorem condimentum nibh egestas, vitae tristique lacus pulvinar. Nulla congue volutpat accumsan. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris vitae enim dolor. Nam et erat eu orci lobortis eleifend quis non mi. Integer eget nulla vitae ex euismod blandit.
+\section{Conclusions}
+Quisque aliquet mauris eu mauris sodales consectetur. Nam in tellus dapibus, malesuada tellus at, gravida ante. Nulla sed vestibulum ante. Praesent diam lacus, iaculis vitae dictum sed, feugiat vel felis. Cras aliquet scelerisque felis, at tempus odio posuere et. Suspendisse luctus consequat pellentesque. Aliquam tempus odio sapien, at egestas libero lacinia vitae. Cras sed augue vel odio semper gravida. Integer consectetur pulvinar nulla et suscipit. In porta ante quis nibh ultricies, nec feugiat lacus eleifend. Fusce sed mi condimentum dolor varius pellentesque ac faucibus risus.
+\begin{table}[h!]
+\centering
+\caption{Table About Conclusions}
+\begin{tabular}{|c | c|} 
+ \hline
+ Conclusion & Recommendation\\ 
+ \hline
+ We failed & Try again \\
+ \hline
+ foo & Bar \\
+ \hline
+ Baz & Blah\\
+ \hline
+\end{tabular}
+\label{table:1}
+\end{table}
+\par \bigskip
+Maecenas porttitor ultricies odio, ut lacinia quam convallis et. Sed luctus, ligula vitae aliquam venenatis, felis mauris cursus felis, in convallis ipsum odio quis enim. Fusce sed neque vitae ex pretium pretium eget sed enim. Ut laoreet sem leo, id pretium arcu laoreet at. Aliquam malesuada volutpat mauris ut iaculis. 
+\section{Recommendations}
+Sed scelerisque ullamcorper sem, ac condimentum purus varius quis. Suspendisse egestas facilisis maximus. Sed ex ligula, mollis et molestie hendrerit, laoreet vel ante. Ut auctor lectus dui, vel feugiat massa aliquam in. Maecenas vitae ex eu ligula consequat sodales. Pellentesque lacinia quam ac turpis eleifend tristique.
+
+\chapter{Other Stuff}
+Other stuff.
+\section{Other Section}
+Section.
+
+\begin{singlespace}
+  \bibliographystyle{apacite}
+  \bibliography{thesis}
+\end{singlespace}
+
+%Reset the figure and label counters to be used in the appendices.
+\renewcommand\thefigure{\thechapter-\arabic{figure}}
+\renewcommand\thetable{\thechapter-\arabic{table}}
+
+\clearpage
+\appendix
+\chapter{LOREM IPSUM DOLOR SIT AMET}
+\setcounter{figure}{0} %reset counters to 0 in each appendix
+\setcounter{table}{0}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Morbi viverra orci non placerat iaculis. Suspendisse mattis lorem condimentum nibh egestas, vitae tristique lacus pulvinar. 
+
+\begin{figure}[h]
+  \centering
+  \caption{\ \ Lorem ipsum dolor sit amet.}
+  \label{figure:a1}
+\end{figure}
+
+Nulla congue volutpat accumsan. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Mauris vitae enim dolor. Nam et erat eu orci lobortis eleifend quis non mi. Integer eget nulla vitae ex euismod blandit.
+
+\chapter{CONSECTETUR ADIPISCING ELIT}
+\setcounter{figure}{0} %reset counters to 0 in each appendix
+\setcounter{table}{0}
+Quisque aliquet mauris eu mauris sodales consectetur. Nam in tellus dapibus, malesuada tellus at, gravida ante. Nulla sed vestibulum ante. Praesent diam lacus, iaculis vitae dictum sed, feugiat vel felis. Cras aliquet scelerisque felis, at tempus odio posuere et. 
+\begin{table}[h]
+\centering
+\caption{Lorem ipsum}
+\begin{tabular}{|l|l|l|}
+\hline
+foo & bar & baz \\ \hline
+bar & baz & foo \\ \hline
+baz & foo & bar \\ \hline
+\end{tabular}
+\label{table:b1}
+\end{table}
+Suspendisse luctus consequat pellentesque. Aliquam tempus odio sapien, at egestas libero lacinia vitae. Cras sed augue vel odio semper gravida. Integer consectetur pulvinar nulla et suscipit. In porta ante quis nibh ultricies, nec feugiat lacus eleifend. Fusce sed mi condimentum dolor varius pellentesque ac faucibus risus.
+
+% ABET outcomes
+\chapter{ABET PROGRAM OUTCOMES}
+\singlespace
+\textit{Program Outcome a.}  An ability to solve electrical engineering problems by applying knowledge of such fundamental and advanced mathematics as calculus, differential equations, linear algebra, and science and engineering principles.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome b.}  An ability to design and conduct experiments in electrical engineering, as well as to collect, analyze and interpret data to reach appropriate conclusions.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome c.}  An ability to design an electrical system, component, or process to meet desired technical, environmental, safety and economical specifications.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome d.}  An ability to participate and contribute in multi-disciplinary team activities.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome e.}  An ability to identify, formulate, and solve engineering problems.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome f.}  An understanding of professional and ethical responsibility and the consequences of failing in it.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome g.}  An ability to communicate effectively in both oral and written fashion.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome h.}  The broad education necessary to understand the impact of engineering solution in a global and societal context.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth} 
+\textit{Program Outcome j.}  A knowledge of contemporary social, economical and political issues and their impact on engineering profession.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth}
+\textit{Program Outcome k.}  An ability and experience in using the techniques, skills, and modern engineering tools necessary for engineering practice.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth}
+\textit{Program Outcome l.}  A knowledge of computer science and computer engineering, and engineering sciences necessary to analyze and design systems containing hardware and software components.
+\begin{adjustwidth}{0.5in}{0in}
+\textit{Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ultricies at nulla eget suscipit. Nunc gravida posuere euismod. Maecenas ac felis eget nunc hendrerit feugiat vitae id nunc. Interdum et malesuada fames ac ante ipsum primis in faucibus. }\\
+\end{adjustwidth}
+
+\end{document}          
